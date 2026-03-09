@@ -31,7 +31,11 @@ let result = await client.performAsync(
 Prefer `PublishedWSClient`: publishes incoming messages and connection state via Combine, keeps the connection alive (`pingInterval`), and auto-reconnects (`reconnectInterval`). `WSClient` is experimental.
 
 ### Stubbing
-- HTTP: wrap real clients with `RpcAsyncClientStubbable(client: RpcClient())`; manage rules mapping `ApiEndpoint` → `ApiResponse` via `upsert` and `removeAllRules`.
+- HTTP: wrap real clients with `RpcAsyncClientStubbable(client: RpcClient())`.
+  - Legacy coarse rule (compatible): `upsert(rule: endpoint, stub: response)`
+  - Query-aware rule: `upsert(rule: endpoint, queryParams: ["page": "1"], stub: response)`
+  - Query + body-aware rule: `upsert(rule: endpoint, queryParams: ["mode": "strict"], bodyData: payload, stub: response)`
+  - `removeAllRules()` clears both legacy and request-signature rules.
 - WebSocket: `PublishedStubbableWSClient` lets you stub responses for outgoing messages. JSON bodies can be normalized with `Data.stableNormalizedJSONString`.
 
 ### Logging

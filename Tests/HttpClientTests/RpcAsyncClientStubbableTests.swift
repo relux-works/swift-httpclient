@@ -51,4 +51,145 @@ import Testing
         #expect(recorded.count == 1)
         #expect(recorded.first?.url == url)
     }
+
+    @Test func performAsyncDistinguishesDifferentQueryParams() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/search", type: .get)
+        await stubbable.upsert(
+            rule: endpoint,
+            queryParams: ["page": "1"],
+            stub: .stub(data: Data("first-page".utf8), code: 200)
+        )
+        await stubbable.upsert(
+            rule: endpoint,
+            queryParams: ["page": "2"],
+            stub: .stub(data: Data("second-page".utf8), code: 200)
+        )
+
+        let firstResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: ["page": "1"],
+            bodyData: nil,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let secondResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: ["page": "2"],
+            bodyData: nil,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try firstResult.requireSuccess().data?.utf8 == "first-page")
+        #expect(try secondResult.requireSuccess().data?.utf8 == "second-page")
+
+        let recorded = await mock.performCalls
+        #expect(recorded.isEmpty, "Underlying client should not be called when query-specific stubs match")
+    }
+
+    @Test func performAsyncCanMatchBodyWhenConfigured() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/filter", type: .post)
+        let queryParams = ["mode": "strict"]
+        let firstBody = Data(#"{"id":"1"}"#.utf8)
+        let secondBody = Data(#"{"id":"2"}"#.utf8)
+        await stubbable.upsert(
+            rule: endpoint,
+            queryParams: queryParams,
+            bodyData: firstBody,
+            stub: .stub(data: Data("first-body".utf8), code: 200)
+        )
+        await stubbable.upsert(
+            rule: endpoint,
+            queryParams: queryParams,
+            bodyData: secondBody,
+            stub: .stub(data: Data("second-body".utf8), code: 200)
+        )
+
+        let firstResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: queryParams,
+            bodyData: firstBody,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let secondResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: queryParams,
+            bodyData: secondBody,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try firstResult.requireSuccess().data?.utf8 == "first-body")
+        #expect(try secondResult.requireSuccess().data?.utf8 == "second-body")
+
+        let recorded = await mock.performCalls
+        #expect(recorded.isEmpty, "Underlying client should not be called when body-aware stubs match")
+    }
+
+    @Test func performAsyncKeepsLegacyEndpointFallbackAndPrefersSpecificRule() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/feed", type: .get)
+        await stubbable.upsert(
+            rule: endpoint,
+            stub: .stub(data: Data("legacy".utf8), code: 200)
+        )
+        await stubbable.upsert(
+            rule: endpoint,
+            queryParams: ["kind": "smoke"],
+            stub: .stub(data: Data("specific".utf8), code: 200)
+        )
+
+        let specificResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: ["kind": "smoke"],
+            bodyData: Data("ignored-by-query-rule".utf8),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let legacyResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: ["kind": "other"],
+            bodyData: nil,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try specificResult.requireSuccess().data?.utf8 == "specific")
+        #expect(try legacyResult.requireSuccess().data?.utf8 == "legacy")
+
+        let recorded = await mock.performCalls
+        #expect(recorded.isEmpty, "Underlying client should not be called when specific or fallback stubs match")
+    }
+}
+
+private extension Result where Success == ApiResponse, Failure == ApiError {
+    func requireSuccess() throws -> ApiResponse {
+        switch self {
+        case let .success(response):
+            return response
+        case let .failure(error):
+            throw error
+        }
+    }
 }

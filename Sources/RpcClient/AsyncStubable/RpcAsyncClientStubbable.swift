@@ -173,9 +173,13 @@ extension RpcAsyncClientStubbable {
     private struct RequestRule: Hashable {
         let endpoint: ApiEndpoint
         let query: [QueryItem]
-        let bodyMatcher: BodyMatcher
+        let bodyMatcher: RpcAsyncClientStubBodyMatcher
 
-        init(endpoint: ApiEndpoint, queryParams: QueryParams, bodyMatcher: BodyMatcher) {
+        init(
+            endpoint: ApiEndpoint,
+            queryParams: QueryParams,
+            bodyMatcher: RpcAsyncClientStubBodyMatcher
+        ) {
             self.endpoint = endpoint
             self.query = queryParams
                 .map { QueryItem(key: $0.key, value: $0.value) }
@@ -192,11 +196,6 @@ extension RpcAsyncClientStubbable {
     private struct QueryItem: Hashable {
         let key: String
         let value: String
-    }
-
-    private enum BodyMatcher: Hashable {
-        case any
-        case exact(Data?)
     }
 
     private func stub(
@@ -236,60 +235,30 @@ extension RpcAsyncClientStubbable {
     }
 }
 extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
-    public func upsert(rule: HttpClient.ApiEndpoint, stub: HttpClient.ApiResponse) async {
-        self.rules[rule] = stub
+    public func upsert(stub: RpcAsyncClientStub) async {
+        switch stub.rule {
+        case let .endpoint(endpoint):
+            self.rules[endpoint] = stub.response
+        case let .request(endpoint, queryParams, bodyMatcher):
+            self.requestRules[
+                .init(endpoint: endpoint, queryParams: queryParams, bodyMatcher: bodyMatcher)
+            ] = stub.response
+        }
     }
 
-    public func upsert(rules: [HttpClient.ApiEndpoint: HttpClient.ApiResponse]) async {
-        self.rules.merge(rules, uniquingKeysWith: { _, right in right })
-    }
-
-    public func upsert(
-        rule: HttpClient.ApiEndpoint,
-        queryParams: HttpClient.QueryParams,
-        stub: HttpClient.ApiResponse
-    ) async {
-        self.requestRules[
-            .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .any)
-        ] = stub
-    }
-
-    public func upsert(
-        rule: HttpClient.ApiEndpoint,
-        queryParams: HttpClient.QueryParams,
-        bodyData: Data?,
-        stub: HttpClient.ApiResponse
-    ) async {
-        self.requestRules[
-            .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .exact(bodyData))
-        ] = stub
-    }
-
-    public func remove(rule: HttpClient.ApiEndpoint) async {
-        self.rules.removeValue(forKey: rule)
-    }
-
-    public func remove(
-        rule: HttpClient.ApiEndpoint,
-        queryParams: HttpClient.QueryParams
-    ) async {
-        self.requestRules.removeValue(
-            forKey: .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .any)
-        )
-    }
-
-    public func remove(
-        rule: HttpClient.ApiEndpoint,
-        queryParams: HttpClient.QueryParams,
-        bodyData: Data?
-    ) async {
-        self.requestRules.removeValue(
-            forKey: .init(
-                endpoint: rule,
-                queryParams: queryParams,
-                bodyMatcher: .exact(bodyData)
+    public func remove(rule: RpcAsyncClientStubRule) async {
+        switch rule {
+        case let .endpoint(endpoint):
+            self.rules.removeValue(forKey: endpoint)
+        case let .request(endpoint, queryParams, bodyMatcher):
+            self.requestRules.removeValue(
+                forKey: .init(
+                    endpoint: endpoint,
+                    queryParams: queryParams,
+                    bodyMatcher: bodyMatcher
+                )
             )
-        )
+        }
     }
 
     public func removeAllRules() async {

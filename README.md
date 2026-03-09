@@ -32,10 +32,21 @@ Prefer `PublishedWSClient`: publishes incoming messages and connection state via
 
 ### Stubbing
 - HTTP: wrap real clients with `RpcAsyncClientStubbable(client: RpcClient())`.
-  - Legacy coarse rule (compatible): `upsert(rule: endpoint, stub: response)`
-  - Query-aware rule: `upsert(rule: endpoint, queryParams: ["page": "1"], stub: response)`
-  - Query + body-aware rule: `upsert(rule: endpoint, queryParams: ["mode": "strict"], bodyData: payload, stub: response)`
-  - `removeAllRules()` clears both legacy and request-signature rules.
+  - Recommended API for UI-test setup (less boilerplate):
+    ```swift
+    await stubbable.upsert(stubs: [
+        .init(endpoint: loginEndpoint, response: loginResponse),
+        .init(endpoint: feedEndpoint, queryParams: ["page": "1"], response: page1Response),
+        .init(
+            endpoint: searchEndpoint,
+            queryParams: ["mode": "strict"],
+            bodyData: payload,
+            response: strictSearchResponse
+        )
+    ])
+    ```
+  - Fine-grained matching uses `RpcAsyncClientStubRule` + `RpcAsyncClientStubBodyMatcher` (`.any` / `.exact(Data?)`).
+  - Compatibility helpers are still available: `upsert(rule:...)`, `upsert(rules:...)`, `remove(rule:...)`, `removeAllRules()`.
 - WebSocket: `PublishedStubbableWSClient` lets you stub responses for outgoing messages. JSON bodies can be normalized with `Data.stableNormalizedJSONString`.
 
 ### Logging

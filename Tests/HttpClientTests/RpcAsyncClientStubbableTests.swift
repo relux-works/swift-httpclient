@@ -181,6 +181,112 @@ import Testing
         let recorded = await mock.performCalls
         #expect(recorded.isEmpty, "Underlying client should not be called when specific or fallback stubs match")
     }
+
+    @Test func upsertStubsBatchSupportsMixedRules() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpointRule = ApiEndpoint(path: "https://example.com/legacy-feed", type: .get)
+        let requestRule = ApiEndpoint(path: "https://example.com/filter", type: .post)
+        let queryParams = ["kind": "smoke"]
+        let exactBody = Data(#"{"id":"1"}"#.utf8)
+
+        await stubbable.upsert(stubs: [
+            .init(
+                endpoint: endpointRule,
+                response: .stub(data: Data("legacy".utf8), code: 200)
+            ),
+            .init(
+                endpoint: requestRule,
+                queryParams: queryParams,
+                response: .stub(data: Data("query-any-body".utf8), code: 200)
+            ),
+            .init(
+                endpoint: requestRule,
+                queryParams: queryParams,
+                bodyData: exactBody,
+                response: .stub(data: Data("exact-body".utf8), code: 200)
+            )
+        ])
+
+        let endpointResult = await stubbable.get(
+            url: try #require(URL(string: endpointRule.path)),
+            headers: [:],
+            retrys: RetryParams(count: 0, delay: { 0 }),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let exactBodyResult = await stubbable.performAsync(
+            endpoint: requestRule,
+            headers: [:],
+            queryParams: queryParams,
+            bodyData: exactBody,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let queryOnlyResult = await stubbable.performAsync(
+            endpoint: requestRule,
+            headers: [:],
+            queryParams: queryParams,
+            bodyData: Data(#"{"id":"2"}"#.utf8),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try endpointResult.requireSuccess().data?.utf8 == "legacy")
+        #expect(try exactBodyResult.requireSuccess().data?.utf8 == "exact-body")
+        #expect(try queryOnlyResult.requireSuccess().data?.utf8 == "query-any-body")
+
+        let getCalls = await mock.getCalls
+        let performCalls = await mock.performCalls
+        #expect(getCalls.isEmpty)
+        #expect(performCalls.isEmpty)
+    }
+
+    @Test func removeRuleCanTargetExactBodyMatcher() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        await mock.setPerfomResult(.success(.stub(data: Data("live".utf8))))
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/cleanup", type: .post)
+        let queryParams = ["mode": "strict"]
+        let bodyData = Data(#"{"id":"1"}"#.utf8)
+
+        await stubbable.upsert(
+            stub: .init(
+                rule: .request(
+                    endpoint: endpoint,
+                    queryParams: queryParams,
+                    bodyMatcher: .exact(bodyData)
+                ),
+                response: .stub(data: Data("to-remove".utf8), code: 200)
+            )
+        )
+        await stubbable.remove(
+            rule: .request(
+                endpoint: endpoint,
+                queryParams: queryParams,
+                bodyMatcher: .exact(bodyData)
+            )
+        )
+
+        let result = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: queryParams,
+            bodyData: bodyData,
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try result.requireSuccess().data?.utf8 == "live")
+        let performCalls = await mock.performCalls
+        #expect(performCalls.count == 1)
+    }
 }
 
 private extension Result where Success == ApiResponse, Failure == ApiError {

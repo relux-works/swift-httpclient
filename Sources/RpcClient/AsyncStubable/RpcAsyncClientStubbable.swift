@@ -5,6 +5,7 @@ public actor RpcAsyncClientStubbable {
     private let logger: any HttpClientLogging
     private let client: IRpcAsyncClient
     private var rules: [ApiEndpoint: ApiResponse] = [:]
+    private var requestRules: [RequestRule: ApiResponse] = [:]
 
     public init(
         client: IRpcAsyncClient,
@@ -91,7 +92,11 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
         functionName: String,
         lineNumber: Int
     ) async -> Result<ApiResponse, ApiError> {
-        switch rules[endpoint] {
+        switch self.stub(
+            endpoint: endpoint,
+            queryParams: queryParams,
+            bodyData: bodyData
+        ) {
             case let .some(stub):
                 self.logResponse(endpoint: endpoint, response: stub)
                 return .success(stub)
@@ -141,7 +146,11 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
         functionName: String,
         lineNumber: Int
     ) async -> Result<HttpClient.ApiResponse, HttpClient.ApiError> {
-        switch rules[endpoint] {
+        switch self.stub(
+            endpoint: endpoint,
+            queryParams: queryParams,
+            bodyData: bodyData
+        ) {
             case let .some(stub):
                 self.logResponse(endpoint: endpoint, response: stub)
                 return .success(stub)
@@ -161,8 +170,69 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
 }
 
 extension RpcAsyncClientStubbable {
+    private struct RequestRule: Hashable {
+        let endpoint: ApiEndpoint
+        let query: [QueryItem]
+        let bodyMatcher: BodyMatcher
+
+        init(endpoint: ApiEndpoint, queryParams: QueryParams, bodyMatcher: BodyMatcher) {
+            self.endpoint = endpoint
+            self.query = queryParams
+                .map { QueryItem(key: $0.key, value: $0.value) }
+                .sorted { lhs, rhs in
+                    if lhs.key == rhs.key {
+                        return lhs.value < rhs.value
+                    }
+                    return lhs.key < rhs.key
+                }
+            self.bodyMatcher = bodyMatcher
+        }
+    }
+
+    private struct QueryItem: Hashable {
+        let key: String
+        let value: String
+    }
+
+    private enum BodyMatcher: Hashable {
+        case any
+        case exact(Data?)
+    }
+
+    private func stub(
+        endpoint: ApiEndpoint,
+        queryParams: QueryParams,
+        bodyData: Data?
+    ) -> ApiResponse? {
+        let exactRule = RequestRule(
+            endpoint: endpoint,
+            queryParams: queryParams,
+            bodyMatcher: .exact(bodyData)
+        )
+        if let stub = self.requestRules[exactRule] {
+            return stub
+        }
+
+        let queryRule = RequestRule(
+            endpoint: endpoint,
+            queryParams: queryParams,
+            bodyMatcher: .any
+        )
+        if let stub = self.requestRules[queryRule] {
+            return stub
+        }
+
+        return self.rules[endpoint]
+    }
+
     private func logResponse(endpoint: ApiEndpoint, response: ApiResponse) {
-        logger.log("🔵 response stubbed for: \(endpoint.type) \(endpoint.path) \nresponse code: \(response.code) \nresponse data: \(response.data?.utf8 ?? "") \nheaders: \(response.headers.payloads)\n")
+        let message = """
+        🔵 response stubbed for: \(endpoint.type) \(endpoint.path)
+        response code: \(response.code)
+        response data: \(response.data?.utf8 ?? "")
+        headers: \(response.headers.payloads)
+        """
+        logger.log(message)
     }
 }
 extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
@@ -174,12 +244,57 @@ extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
         self.rules.merge(rules, uniquingKeysWith: { _, right in right })
     }
 
+    public func upsert(
+        rule: HttpClient.ApiEndpoint,
+        queryParams: HttpClient.QueryParams,
+        stub: HttpClient.ApiResponse
+    ) async {
+        self.requestRules[
+            .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .any)
+        ] = stub
+    }
+
+    public func upsert(
+        rule: HttpClient.ApiEndpoint,
+        queryParams: HttpClient.QueryParams,
+        bodyData: Data?,
+        stub: HttpClient.ApiResponse
+    ) async {
+        self.requestRules[
+            .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .exact(bodyData))
+        ] = stub
+    }
+
     public func remove(rule: HttpClient.ApiEndpoint) async {
         self.rules.removeValue(forKey: rule)
     }
 
+    public func remove(
+        rule: HttpClient.ApiEndpoint,
+        queryParams: HttpClient.QueryParams
+    ) async {
+        self.requestRules.removeValue(
+            forKey: .init(endpoint: rule, queryParams: queryParams, bodyMatcher: .any)
+        )
+    }
+
+    public func remove(
+        rule: HttpClient.ApiEndpoint,
+        queryParams: HttpClient.QueryParams,
+        bodyData: Data?
+    ) async {
+        self.requestRules.removeValue(
+            forKey: .init(
+                endpoint: rule,
+                queryParams: queryParams,
+                bodyMatcher: .exact(bodyData)
+            )
+        )
+    }
+
     public func removeAllRules() async {
         self.rules.removeAll()
+        self.requestRules.removeAll()
     }
 }
 

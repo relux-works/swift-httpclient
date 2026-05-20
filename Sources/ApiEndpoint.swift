@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ApiEndpoint: Sendable, Hashable {
+public struct ApiEndpoint: Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible {
     public let path: String
     public let type: ApiRequestType
     
@@ -15,6 +15,28 @@ public struct ApiEndpoint: Sendable, Hashable {
     init(from apiFullEndpoint: ApiFullEndpoint) {
         self.path = apiFullEndpoint.url.absoluteString
         self.type = apiFullEndpoint.type
+    }
+
+    public var description: String {
+        "\(type.rawValue) \(displayPath)"
+    }
+
+    public var debugDescription: String {
+        description
+    }
+
+    private var displayPath: String {
+        if let url = URL(string: path),
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           !components.path.isEmpty {
+            return components.path
+        }
+
+        if path.hasPrefix("/") {
+            return path
+        }
+
+        return "/\(path)"
     }
 }
 

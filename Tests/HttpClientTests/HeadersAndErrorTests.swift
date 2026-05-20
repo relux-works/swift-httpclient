@@ -22,5 +22,7 @@ import Testing
         #expect(error.data["url"] == endpoint.path)
         #expect(error.responseCode == 400)
         #expect(error.conciseDescription.contains("400"))
+        #expect(error.localizedDescription.contains("400"))
+        #expect(error.localizedDescription.contains("bad"))
     }
 }

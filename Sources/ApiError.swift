@@ -1,7 +1,7 @@
 import Foundation
 
 
-public struct ApiError: Sendable, Error {
+public struct ApiError: Sendable, Error, LocalizedError, CustomStringConvertible, CustomDebugStringConvertible {
     public let violation: ErrorViolation
     public let sender: Any.Type?
     public let message: String
@@ -24,6 +24,10 @@ public struct ApiError: Sendable, Error {
     }
 
     public var debugDescription: String {
+        conciseDescription
+    }
+
+    public var errorDescription: String? {
         conciseDescription
     }
     
@@ -118,4 +122,3 @@ public extension ApiError {
 		case fatal = "Fatal"
 	}
 }
-

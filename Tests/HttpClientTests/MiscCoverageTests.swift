@@ -23,6 +23,11 @@ import Testing
         #expect(full.url.absoluteString == endpoint.path)
     }
 
+    @Test func apiEndpointDescriptionUsesMethodAndPath() {
+        #expect(ApiEndpoint(path: "https://example.com/api/v1/me", type: .get).description == "GET /api/v1/me")
+        #expect(ApiEndpoint(path: "auth/logout", type: .post).description == "POST /auth/logout")
+    }
+
     @Test func apiResponseHeaderLookupIsCaseInsensitive() {
         let response = ApiResponse(
             data: nil,

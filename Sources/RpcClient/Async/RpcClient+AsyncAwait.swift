@@ -225,7 +225,14 @@ extension RpcClient: IRpcAsyncClient {
             logger.log("🟢 successful   \(ApiRequestType.get) \(url.description) \nresponse data: \(data.utf8 ?? "") \nheaders: \(apiResponse.headers.payloads)\n")
             return .success(apiResponse)
         } catch let error as ApiError {
-            logger.log("🔴 fail \(ApiRequestType.get) \(url.description) \nerror: \(error.localizedDescription)")
+            logger.log(
+                """
+                🔴 fail \(ApiRequestType.get) \(url.description)
+                error: \(error.responseCode): \(error.conciseDescription)
+                response data: \(error.rawData?.utf8 ?? "nil")
+                response headers: \(error.responseHeaders.payloads)
+                """
+            )
             return .failure(error)
         } catch {
             logger.log("🔴 fail \(ApiRequestType.get) \(url.description) \nerror: \(error.localizedDescription)")
@@ -349,7 +356,14 @@ extension RpcClient: IRpcAsyncClient {
             return .success(apiResponse)
 
         } catch let error as ApiError {
-            logger.log("🔴 fail \(type) \(path) \nerror: \(error.responseCode): \(error.localizedDescription)\nresponse headers: \(error.responseHeaders)")
+            logger.log(
+                """
+                🔴 fail \(type) \(path)
+                error: \(error.responseCode): \(error.conciseDescription)
+                response data: \(error.rawData?.utf8 ?? "nil")
+                response headers: \(error.responseHeaders.payloads)
+                """
+            )
             return .failure(error)
         } catch {
             logger.log("🔴 fail \(type) \(path) \nerror: \(error.localizedDescription)")

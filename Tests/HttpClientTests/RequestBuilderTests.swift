@@ -37,4 +37,18 @@ import Testing
         #expect(request.url == url)
         #expect(request.value(forHTTPHeaderField: HeaderKey.authorization) == HeaderValue.bearer(token: "t"))
     }
+
+    @Test func curlSkipsBodyFlagWhenBodyIsNil() throws {
+        let url = try #require(URL(string: "https://example.com/me"))
+        let curl = RpcClient.create_cURL(
+            requestType: .get,
+            path: url,
+            headers: ["Cookie": "JSESSIONID=session-123"],
+            bodyData: nil
+        )
+
+        #expect(curl.contains(#"-H 'Cookie: JSESSIONID=session-123'"#))
+        #expect(!curl.contains("-d $''"))
+        #expect(!curl.contains("\n     -d "))
+    }
 }

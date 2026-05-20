@@ -28,6 +28,7 @@ Carthage/Build
 *.xcframework
 
 DerivedData/
+Derived/
 
 AGENTS.md
 CLAUDE.md

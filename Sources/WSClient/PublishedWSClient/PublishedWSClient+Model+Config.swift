@@ -36,7 +36,6 @@ extension PublishedWSClient.Config: Equatable {
         lhs.pingInterval == rhs.pingInterval
             && lhs.reconnectInterval == rhs.reconnectInterval
             && lhs.urlPath == rhs.urlPath
-            && ObjectIdentifier(lhs.headers as AnyObject) == ObjectIdentifier(rhs.headers as AnyObject)
     }
 }
 

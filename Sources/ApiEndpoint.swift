@@ -28,6 +28,7 @@ public struct ApiEndpoint: Sendable, Hashable, CustomStringConvertible, CustomDe
     private var displayPath: String {
         if let url = URL(string: path),
            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           components.scheme != nil,
            !components.path.isEmpty {
             return components.path
         }

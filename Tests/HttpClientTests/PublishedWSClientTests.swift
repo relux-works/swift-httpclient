@@ -157,6 +157,7 @@ import Testing
         let configC = PublishedWSClient.Config(pingInterval: 5, reconnectInterval: 2, urlPath: "wss://example.com", headers: headers)
 
         #expect(configA == configA)
+        #expect(configA == configB)
         #expect(configA.urlPath == configB.urlPath)
         #expect(configA != configC)
         #expect(configA.sessionConfig.timeoutIntervalForRequest == 120)

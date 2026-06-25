@@ -1,6 +1,6 @@
 ## User Data
-
 *.xcuserdatad
+xcuserdata/
 
 # notes
 notes
@@ -14,23 +14,31 @@ Pods/
 Podfile.lock
 
 # Carthage
-Carthage/Build
+Carthage/Build/
 
-# fastlane
-# https://docs.fastlane.tools/best-practices/source-control/#source-control
-
-.build
-.swiftpm
-.idea
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
 *.resolved
-*.xcworkspace
-*.xcodeproj
-*.framework
-*.xcframework
 
-DerivedData/
+# Xcode generated files
 Derived/
+DerivedData/
+Derived*/
+*.xcodeproj/
+*.xcworkspace/
+*.xcresult/
+*.xcuserstate
+*.framework/
+*.xcframework/
 
+# IDE
+.idea/
+
+# Agent runtime materialized docs
 AGENTS.md
 CLAUDE.md
-.temp
+
+# task-board / agent runtime scratch
+.temp/

@@ -4,8 +4,7 @@ import Foundation
 public actor RpcAsyncClientStubbable {
     private let logger: any HttpClientLogging
     private let client: IRpcAsyncClient
-    private var rules: [ApiEndpoint: ApiResponse] = [:]
-    private var requestRules: [RequestRule: ApiResponse] = [:]
+    private var stubs: [RpcAsyncClientStub] = []
 
     public init(
         client: IRpcAsyncClient,
@@ -25,7 +24,11 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
         lineNumber: Int
     ) async -> Result<ApiResponse, ApiError> {
         let endpoint = ApiEndpoint(path: url.description, type: .get)
-        switch rules[endpoint] {
+        switch self.stub(
+            endpoint: endpoint,
+            queryParams: [:],
+            bodyData: nil
+        ) {
             case let .some(stub):
                 self.logResponse(endpoint: endpoint, response: stub)
                 return .success(stub)
@@ -67,7 +70,11 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
         lineNumber: Int
     ) async -> Result<ApiResponse, ApiError> {
         let endpoint = ApiEndpoint(path: url.description, type: .get)
-        switch rules[endpoint] {
+        switch self.stub(
+            endpoint: endpoint,
+            queryParams: [:],
+            bodyData: nil
+        ) {
             case let .some(stub):
                 self.logResponse(endpoint: endpoint, response: stub)
                 return .success(stub)
@@ -170,58 +177,37 @@ extension RpcAsyncClientStubbable: IRpcAsyncClient {
 }
 
 extension RpcAsyncClientStubbable {
-    private struct RequestRule: Hashable {
-        let endpoint: ApiEndpoint
-        let query: [QueryItem]
-        let bodyMatcher: RpcAsyncClientStubBodyMatcher
-
-        init(
-            endpoint: ApiEndpoint,
-            queryParams: QueryParams,
-            bodyMatcher: RpcAsyncClientStubBodyMatcher
-        ) {
-            self.endpoint = endpoint
-            self.query = queryParams
-                .map { QueryItem(key: $0.key, value: $0.value) }
-                .sorted { lhs, rhs in
-                    if lhs.key == rhs.key {
-                        return lhs.value < rhs.value
-                    }
-                    return lhs.key < rhs.key
-                }
-            self.bodyMatcher = bodyMatcher
-        }
-    }
-
-    private struct QueryItem: Hashable {
-        let key: String
-        let value: String
-    }
-
     private func stub(
         endpoint: ApiEndpoint,
         queryParams: QueryParams,
         bodyData: Data?
     ) -> ApiResponse? {
-        let exactRule = RequestRule(
+        let request = StubRequest(
             endpoint: endpoint,
             queryParams: queryParams,
-            bodyMatcher: .exact(bodyData)
+            bodyData: bodyData
         )
-        if let stub = self.requestRules[exactRule] {
-            return stub
-        }
-
-        let queryRule = RequestRule(
-            endpoint: endpoint,
-            queryParams: queryParams,
-            bodyMatcher: .any
-        )
-        if let stub = self.requestRules[queryRule] {
-            return stub
-        }
-
-        return self.rules[endpoint]
+        let matches = stubs
+            .enumerated()
+            .compactMap { index, stub -> StubCandidate? in
+                guard stub.matches(request: request) else { return nil }
+                return StubCandidate(
+                    index: index,
+                    specificity: stub.rule.specificity,
+                    isConditional: stub.mode.isConditional,
+                    response: stub.response
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.specificity != rhs.specificity {
+                    return lhs.specificity > rhs.specificity
+                }
+                if lhs.isConditional != rhs.isConditional {
+                    return lhs.isConditional && !rhs.isConditional
+                }
+                return lhs.index < rhs.index
+            }
+        return matches.first?.response
     }
 
     private func logResponse(endpoint: ApiEndpoint, response: ApiResponse) {
@@ -234,37 +220,181 @@ extension RpcAsyncClientStubbable {
         logger.log(message)
     }
 }
+
+private extension RpcAsyncClientStubbable {
+    struct StubCandidate {
+        let index: Int
+        let specificity: Int
+        let isConditional: Bool
+        let response: ApiResponse
+    }
+}
 extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
     public func upsert(stub: RpcAsyncClientStub) async {
-        switch stub.rule {
-        case let .endpoint(endpoint):
-            self.rules[endpoint] = stub.response
-        case let .request(endpoint, queryParams, bodyMatcher):
-            self.requestRules[
-                .init(endpoint: endpoint, queryParams: queryParams, bodyMatcher: bodyMatcher)
-            ] = stub.response
+        if let index = stubs.firstIndex(where: { $0.rule == stub.rule && $0.mode == stub.mode }) {
+            stubs[index] = stub
+        } else {
+            stubs.append(stub)
         }
     }
 
     public func remove(rule: RpcAsyncClientStubRule) async {
-        switch rule {
-        case let .endpoint(endpoint):
-            self.rules.removeValue(forKey: endpoint)
-        case let .request(endpoint, queryParams, bodyMatcher):
-            self.requestRules.removeValue(
-                forKey: .init(
-                    endpoint: endpoint,
-                    queryParams: queryParams,
-                    bodyMatcher: bodyMatcher
-                )
-            )
-        }
+        stubs.removeAll { $0.rule == rule }
     }
 
     public func removeAllRules() async {
-        self.rules.removeAll()
-        self.requestRules.removeAll()
+        self.stubs.removeAll()
     }
 }
 
 // swiftlint:enable function_parameter_count
+
+private struct StubRequest {
+    let endpoint: ApiEndpoint
+    let queryParams: QueryParams
+    let bodyData: Data?
+
+    var mergedQueryParams: QueryParams {
+        var merged: QueryParams = [:]
+        if let components = URLComponents(string: endpoint.path) {
+            for item in components.queryItems ?? [] {
+                guard let value = item.value else { continue }
+                merged[item.name] = value
+            }
+        }
+        for (key, value) in queryParams {
+            merged[key] = value
+        }
+        return merged
+    }
+}
+
+private extension RpcAsyncClientStub {
+    func matches(request: StubRequest) -> Bool {
+        guard rule.matches(request: request) else { return false }
+        return mode.matches(request: request)
+    }
+}
+
+private extension RpcAsyncClientStubRule {
+    var specificity: Int {
+        switch self {
+        case .endpoint:
+            return 1
+        case let .request(_, _, bodyMatcher):
+            switch bodyMatcher {
+            case .any:
+                return 2
+            case .exact:
+                return 3
+            }
+        }
+    }
+
+    func matches(request: StubRequest) -> Bool {
+        switch self {
+        case let .endpoint(endpoint):
+            return endpoint == request.endpoint
+        case let .request(endpoint, queryParams, bodyMatcher):
+            return endpoint == request.endpoint
+                && queryParams == request.queryParams
+                && bodyMatcher.matches(bodyData: request.bodyData)
+        }
+    }
+}
+
+private extension RpcAsyncClientStubBodyMatcher {
+    func matches(bodyData: Data?) -> Bool {
+        switch self {
+        case .any:
+            return true
+        case let .exact(expected):
+            return expected == bodyData
+        }
+    }
+}
+
+private extension RpcAsyncClientStubMode {
+    var isConditional: Bool {
+        switch self {
+        case .absolute:
+            return false
+        case .conditional:
+            return true
+        }
+    }
+
+    func matches(request: StubRequest) -> Bool {
+        switch self {
+        case .absolute:
+            return true
+        case let .conditional(condition):
+            return condition.matches(request: request)
+        }
+    }
+}
+
+private extension RpcAsyncClientStubCondition {
+    func matches(request: StubRequest) -> Bool {
+        switch self {
+        case let .allSatisfy(conditions):
+            return conditions.allSatisfy { $0.matches(request: request) }
+        case let .anySatisfy(conditions):
+            return conditions.contains { $0.matches(request: request) }
+        case let .not(condition):
+            return !condition.matches(request: request)
+        case let .bodyContains(key, value):
+            return request.bodyData?.jsonValue(forKey: key) == value
+        case let .queryParameterContains(key, value):
+            return request.mergedQueryParams[key] == value
+        case let .value(value):
+            return value
+        }
+    }
+}
+
+private extension Data {
+    func jsonValue(forKey key: String) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: self),
+              let value = Self.findValue(in: object, forKey: key)
+        else { return nil }
+        return Self.stringValue(from: value)
+    }
+
+    static func findValue(in object: Any, forKey key: String) -> Any? {
+        if let dictionary = object as? [String: Any] {
+            if let value = dictionary[key] {
+                return value
+            }
+            for value in dictionary.values {
+                if let found = findValue(in: value, forKey: key) {
+                    return found
+                }
+            }
+        }
+        if let array = object as? [Any] {
+            for value in array {
+                if let found = findValue(in: value, forKey: key) {
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+
+    static func stringValue(from value: Any) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return number.boolValue ? "true" : "false"
+            }
+            return number.stringValue
+        case _ as NSNull:
+            return nil
+        default:
+            return String(describing: value)
+        }
+    }
+}

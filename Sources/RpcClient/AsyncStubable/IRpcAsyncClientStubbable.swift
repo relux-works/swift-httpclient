@@ -5,7 +5,7 @@ public enum RpcAsyncClientStubBodyMatcher: Sendable, Hashable {
     case exact(Data?)
 }
 
-public enum RpcAsyncClientStubRule: Sendable {
+public enum RpcAsyncClientStubRule: Sendable, Hashable {
     case endpoint(ApiEndpoint)
     case request(
         endpoint: ApiEndpoint,
@@ -26,15 +26,32 @@ public enum RpcAsyncClientStubRule: Sendable {
     }
 }
 
+public enum RpcAsyncClientStubMode: Sendable, Hashable {
+    case absolute
+    case conditional(RpcAsyncClientStubCondition)
+}
+
+public indirect enum RpcAsyncClientStubCondition: Sendable, Hashable {
+    case allSatisfy([RpcAsyncClientStubCondition])
+    case anySatisfy([RpcAsyncClientStubCondition])
+    case not(RpcAsyncClientStubCondition)
+    case bodyContains(key: String, value: String)
+    case queryParameterContains(key: String, value: String)
+    case value(Bool)
+}
+
 public struct RpcAsyncClientStub: Sendable {
     public let rule: RpcAsyncClientStubRule
+    public let mode: RpcAsyncClientStubMode
     public let response: ApiResponse
 
     public init(
         rule: RpcAsyncClientStubRule,
+        mode: RpcAsyncClientStubMode = .absolute,
         response: ApiResponse
     ) {
         self.rule = rule
+        self.mode = mode
         self.response = response
     }
 
@@ -44,6 +61,18 @@ public struct RpcAsyncClientStub: Sendable {
     ) {
         self.init(
             rule: .endpoint(endpoint),
+            response: response
+        )
+    }
+
+    public init(
+        endpoint: ApiEndpoint,
+        condition: RpcAsyncClientStubCondition,
+        response: ApiResponse
+    ) {
+        self.init(
+            rule: .endpoint(endpoint),
+            mode: .conditional(condition),
             response: response
         )
     }
@@ -66,6 +95,23 @@ public struct RpcAsyncClientStub: Sendable {
     public init(
         endpoint: ApiEndpoint,
         queryParams: QueryParams,
+        condition: RpcAsyncClientStubCondition,
+        response: ApiResponse
+    ) {
+        self.init(
+            rule: .request(
+                endpoint: endpoint,
+                queryParams: queryParams,
+                bodyMatcher: .any
+            ),
+            mode: .conditional(condition),
+            response: response
+        )
+    }
+
+    public init(
+        endpoint: ApiEndpoint,
+        queryParams: QueryParams,
         bodyData: Data?,
         response: ApiResponse
     ) {
@@ -75,6 +121,24 @@ public struct RpcAsyncClientStub: Sendable {
                 queryParams: queryParams,
                 bodyMatcher: .exact(bodyData)
             ),
+            response: response
+        )
+    }
+
+    public init(
+        endpoint: ApiEndpoint,
+        queryParams: QueryParams,
+        bodyData: Data?,
+        condition: RpcAsyncClientStubCondition,
+        response: ApiResponse
+    ) {
+        self.init(
+            rule: .request(
+                endpoint: endpoint,
+                queryParams: queryParams,
+                bodyMatcher: .exact(bodyData)
+            ),
+            mode: .conditional(condition),
             response: response
         )
     }

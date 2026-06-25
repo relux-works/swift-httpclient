@@ -46,6 +46,22 @@ Prefer `PublishedWSClient`: publishes incoming messages and connection state via
     ])
     ```
   - Fine-grained matching uses `RpcAsyncClientStubRule` + `RpcAsyncClientStubBodyMatcher` (`.any` / `.exact(Data?)`).
+  - Conditional matching allows several responses for the same endpoint. Conditions can inspect JSON body fields,
+    URL/query parameters, and can be composed with `allSatisfy`, `anySatisfy`, and `not`:
+    ```swift
+    await stubbable.upsert(stubs: [
+        .init(
+            endpoint: confirmEndpoint,
+            condition: .bodyContains(key: "otp", value: "00000"),
+            response: invalidOtpResponse
+        ),
+        .init(
+            endpoint: confirmEndpoint,
+            condition: .bodyContains(key: "otp", value: "11111"),
+            response: successResponse
+        )
+    ])
+    ```
   - Compatibility helpers are still available: `upsert(rule:...)`, `upsert(rules:...)`, `remove(rule:...)`, `removeAllRules()`.
 - WebSocket: `PublishedStubbableWSClient` lets you stub responses for outgoing messages. JSON bodies can be normalized with `Data.stableNormalizedJSONString`.
 

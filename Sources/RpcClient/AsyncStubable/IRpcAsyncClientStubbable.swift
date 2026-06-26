@@ -43,16 +43,29 @@ public indirect enum RpcAsyncClientStubCondition: Sendable, Hashable {
 public struct RpcAsyncClientStub: Sendable {
     public let rule: RpcAsyncClientStubRule
     public let mode: RpcAsyncClientStubMode
-    public let response: ApiResponse
+    public let responses: [ApiResponse]
 
     public init(
         rule: RpcAsyncClientStubRule,
         mode: RpcAsyncClientStubMode = .absolute,
         response: ApiResponse
     ) {
+        self.init(
+            rule: rule,
+            mode: mode,
+            responses: [response]
+        )
+    }
+
+    public init(
+        rule: RpcAsyncClientStubRule,
+        mode: RpcAsyncClientStubMode = .absolute,
+        responses: [ApiResponse]
+    ) {
         self.rule = rule
         self.mode = mode
-        self.response = response
+        precondition(responses.isEmpty == false, "RpcAsyncClientStub requires at least one response.")
+        self.responses = responses
     }
 
     public init(
@@ -62,6 +75,16 @@ public struct RpcAsyncClientStub: Sendable {
         self.init(
             rule: .endpoint(endpoint),
             response: response
+        )
+    }
+
+    public init(
+        endpoint: ApiEndpoint,
+        responses: [ApiResponse]
+    ) {
+        self.init(
+            rule: .endpoint(endpoint),
+            responses: responses
         )
     }
 

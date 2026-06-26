@@ -32,6 +32,52 @@ import Testing
         #expect(recorded.isEmpty, "Underlying client should not be called when stub matches")
     }
 
+    @Test func sequentialStubReturnsResponsesInOrderAndRepeatsLast() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/balance", type: .get)
+        await stubbable.upsert(
+            stub: .init(
+                endpoint: endpoint,
+                responses: [
+                    .stub(data: Data("first".utf8), code: 200),
+                    .stub(data: Data("second".utf8), code: 200)
+                ]
+            )
+        )
+
+        let first = await stubbable.get(
+            url: try #require(URL(string: endpoint.path)),
+            headers: [:],
+            retrys: RetryParams(count: 0, delay: { 0 }),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let second = await stubbable.get(
+            url: try #require(URL(string: endpoint.path)),
+            headers: [:],
+            retrys: RetryParams(count: 0, delay: { 0 }),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let third = await stubbable.get(
+            url: try #require(URL(string: endpoint.path)),
+            headers: [:],
+            retrys: RetryParams(count: 0, delay: { 0 }),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try first.requireSuccess().data?.utf8 == "first")
+        #expect(try second.requireSuccess().data?.utf8 == "second")
+        #expect(try third.requireSuccess().data?.utf8 == "second")
+        #expect(await mock.getCalls.isEmpty)
+    }
+
     @Test func fallsBackToClientWhenNoStub() async throws {
         let mock = RpcClientWithAsyncAwaitMock()
         await mock.setGetResult(.success(.stub(data: Data("live".utf8))))
@@ -329,6 +375,82 @@ import Testing
         #expect(try wrongResult.requireSuccess().data?.utf8 == "wrong-otp")
         #expect(try successResult.requireSuccess().data?.utf8 == "success")
         #expect(await mock.performCalls.isEmpty)
+    }
+
+    @Test func conditionalOTPContractUsesNotFallbackForWrongCodesOnSameEndpoint() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/transfers/ui-test-transfer/confirm", type: .post)
+        let successOTP = "11111"
+        await stubbable.upsert(stubs: [
+            .init(
+                endpoint: endpoint,
+                condition: .bodyContains(key: "otp", value: successOTP),
+                response: .stub(data: Data(#"{"status":"completed"}"#.utf8), code: 200)
+            ),
+            .init(
+                endpoint: endpoint,
+                condition: .not(.bodyContains(key: "otp", value: successOTP)),
+                response: .stub(data: Data(#"{"error":{"code":"WRONG_OTP"}}"#.utf8), code: 422)
+            )
+        ])
+
+        let wrongResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: [:],
+            bodyData: Data(#"{"otp":"00000"}"#.utf8),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+        let successResult = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: [:],
+            bodyData: Data(#"{"otp":"\#(successOTP)"}"#.utf8),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try wrongResult.requireSuccess().code == 422)
+        #expect(try wrongResult.requireSuccess().data?.utf8 == #"{"error":{"code":"WRONG_OTP"}}"#)
+        #expect(try successResult.requireSuccess().code == 200)
+        #expect(try successResult.requireSuccess().data?.utf8 == #"{"status":"completed"}"#)
+        #expect(await mock.performCalls.isEmpty)
+    }
+
+    @Test func conditionalEndpointFallsBackToClientWhenNoConditionMatches() async throws {
+        let mock = RpcClientWithAsyncAwaitMock()
+        await mock.setPerfomResult(.success(.stub(data: Data("live".utf8), code: 204)))
+        let stubbable = RpcAsyncClientStubbable(client: mock, logger: TestLogger())
+
+        let endpoint = ApiEndpoint(path: "https://example.com/transfers/ui-test-transfer/confirm", type: .post)
+        await stubbable.upsert(
+            stub: .init(
+                endpoint: endpoint,
+                condition: .bodyContains(key: "otp", value: "11111"),
+                response: .stub(data: Data("success".utf8), code: 200)
+            )
+        )
+
+        let result = await stubbable.performAsync(
+            endpoint: endpoint,
+            headers: [:],
+            queryParams: [:],
+            bodyData: Data(#"{"otp":"00000"}"#.utf8),
+            fileID: #fileID,
+            functionName: #function,
+            lineNumber: #line
+        )
+
+        #expect(try result.requireSuccess().code == 204)
+        #expect(try result.requireSuccess().data?.utf8 == "live")
+        let performCalls = await mock.performCalls
+        #expect(performCalls.count == 1)
+        #expect(performCalls.first?.endpoint == endpoint)
     }
 
     @Test func conditionalStubSupportsQueryAndBooleanComposition() async throws {

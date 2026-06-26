@@ -5,6 +5,7 @@ public actor RpcAsyncClientStubbable {
     private let logger: any HttpClientLogging
     private let client: IRpcAsyncClient
     private var stubs: [RpcAsyncClientStub] = []
+    private var responseCursors: [RpcAsyncClientStubKey: Int] = [:]
 
     public init(
         client: IRpcAsyncClient,
@@ -193,9 +194,10 @@ extension RpcAsyncClientStubbable {
                 guard stub.matches(request: request) else { return nil }
                 return StubCandidate(
                     index: index,
+                    key: stub.key,
                     specificity: stub.rule.specificity,
                     isConditional: stub.mode.isConditional,
-                    response: stub.response
+                    responses: stub.responses
                 )
             }
             .sorted { lhs, rhs in
@@ -207,7 +209,8 @@ extension RpcAsyncClientStubbable {
                 }
                 return lhs.index < rhs.index
             }
-        return matches.first?.response
+        guard let match = matches.first else { return nil }
+        return nextResponse(for: match)
     }
 
     private func logResponse(endpoint: ApiEndpoint, response: ApiResponse) {
@@ -219,14 +222,23 @@ extension RpcAsyncClientStubbable {
         """
         logger.log(message)
     }
+
+    private func nextResponse(for candidate: StubCandidate) -> ApiResponse? {
+        guard candidate.responses.isEmpty == false else { return nil }
+        let cursor = responseCursors[candidate.key] ?? 0
+        let responseIndex = min(cursor, candidate.responses.count - 1)
+        responseCursors[candidate.key] = min(cursor + 1, candidate.responses.count - 1)
+        return candidate.responses[responseIndex]
+    }
 }
 
 private extension RpcAsyncClientStubbable {
     struct StubCandidate {
         let index: Int
+        let key: RpcAsyncClientStubKey
         let specificity: Int
         let isConditional: Bool
-        let response: ApiResponse
+        let responses: [ApiResponse]
     }
 }
 extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
@@ -236,14 +248,19 @@ extension RpcAsyncClientStubbable: IRpcAsyncClientStubbable {
         } else {
             stubs.append(stub)
         }
+        responseCursors.removeValue(forKey: stub.key)
     }
 
     public func remove(rule: RpcAsyncClientStubRule) async {
+        for stub in stubs where stub.rule == rule {
+            responseCursors.removeValue(forKey: stub.key)
+        }
         stubs.removeAll { $0.rule == rule }
     }
 
     public func removeAllRules() async {
         self.stubs.removeAll()
+        self.responseCursors.removeAll()
     }
 }
 
@@ -266,6 +283,17 @@ private struct StubRequest {
             merged[key] = value
         }
         return merged
+    }
+}
+
+private struct RpcAsyncClientStubKey: Sendable, Hashable {
+    let rule: RpcAsyncClientStubRule
+    let mode: RpcAsyncClientStubMode
+}
+
+private extension RpcAsyncClientStub {
+    var key: RpcAsyncClientStubKey {
+        RpcAsyncClientStubKey(rule: rule, mode: mode)
     }
 }
 
